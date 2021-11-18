@@ -53,11 +53,12 @@ var globalSessionCache = &SessionCache{
 // S3 is a storage type which interacts with S3API, DownloaderAPI and
 // UploaderAPI.
 type S3 struct {
-	api         s3iface.S3API
-	downloader  s3manageriface.DownloaderAPI
-	uploader    s3manageriface.UploaderAPI
-	endpointURL urlpkg.URL
-	dryRun      bool
+	api          s3iface.S3API
+	downloader   s3manageriface.DownloaderAPI
+	uploader     s3manageriface.UploaderAPI
+	endpointURL  urlpkg.URL
+	dryRun       bool
+	requestPayer string
 }
 
 func parseEndpoint(endpoint string) (urlpkg.URL, error) {
@@ -90,19 +91,21 @@ func newS3Storage(ctx context.Context, opts Options) (*S3, error) {
 	}
 
 	return &S3{
-		api:         s3.New(awsSession),
-		downloader:  s3manager.NewDownloader(awsSession),
-		uploader:    s3manager.NewUploader(awsSession),
-		endpointURL: endpointURL,
-		dryRun:      opts.DryRun,
+		api:          s3.New(awsSession),
+		downloader:   s3manager.NewDownloader(awsSession),
+		uploader:     s3manager.NewUploader(awsSession),
+		endpointURL:  endpointURL,
+		dryRun:       opts.DryRun,
+		requestPayer: opts.RequestPayer,
 	}, nil
 }
 
 // Stat retrieves metadata from S3 object without returning the object itself.
 func (s *S3) Stat(ctx context.Context, url *url.URL) (*Object, error) {
 	output, err := s.api.HeadObjectWithContext(ctx, &s3.HeadObjectInput{
-		Bucket: aws.String(url.Bucket),
-		Key:    aws.String(url.Path),
+		Bucket:       aws.String(url.Bucket),
+		Key:          aws.String(url.Path),
+		RequestPayer: aws.String(s.requestPayer),
 	})
 	if err != nil {
 		if errHasCode(err, "NotFound") {
@@ -135,6 +138,7 @@ func (s *S3) listObjectsV2(ctx context.Context, url *url.URL) <-chan *Object {
 	listInput := s3.ListObjectsV2Input{
 		Bucket: aws.String(url.Bucket),
 		Prefix: aws.String(url.Prefix),
+		RequestPayer: aws.String(s.requestPayer),
 	}
 
 	if url.Delimiter != "" {
@@ -226,6 +230,7 @@ func (s *S3) listObjects(ctx context.Context, url *url.URL) <-chan *Object {
 	listInput := s3.ListObjectsInput{
 		Bucket: aws.String(url.Bucket),
 		Prefix: aws.String(url.Prefix),
+		RequestPayer: aws.String(s.requestPayer),
 	}
 
 	if url.Delimiter != "" {
@@ -325,6 +330,7 @@ func (s *S3) Copy(ctx context.Context, from, to *url.URL, metadata Metadata) err
 		Bucket:     aws.String(to.Bucket),
 		Key:        aws.String(to.Path),
 		CopySource: aws.String(copySource),
+		RequestPayer: aws.String(s.requestPayer),
 	}
 
 	storageClass := metadata.StorageClass()
@@ -369,6 +375,7 @@ func (s *S3) Read(ctx context.Context, src *url.URL) (io.ReadCloser, error) {
 	resp, err := s.api.GetObjectWithContext(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(src.Bucket),
 		Key:    aws.String(src.Path),
+		RequestPayer: aws.String(s.requestPayer),
 	})
 	if err != nil {
 		return nil, err
@@ -393,6 +400,7 @@ func (s *S3) Get(
 	return s.downloader.DownloadWithContext(ctx, to, &s3.GetObjectInput{
 		Bucket: aws.String(from.Bucket),
 		Key:    aws.String(from.Path),
+		RequestPayer: aws.String(s.requestPayer),
 	}, func(u *s3manager.Downloader) {
 		u.PartSize = partSize
 		u.Concurrency = concurrency
@@ -496,6 +504,7 @@ func (s *S3) Put(
 		Key:         aws.String(to.Path),
 		Body:        reader,
 		ContentType: aws.String(contentType),
+		RequestPayer: aws.String(s.requestPayer),
 	}
 
 	storageClass := metadata.StorageClass()
@@ -618,6 +627,7 @@ func (s *S3) doDelete(ctx context.Context, chunk chunk, resultch chan *Object) {
 	o, err := s.api.DeleteObjectsWithContext(ctx, &s3.DeleteObjectsInput{
 		Bucket: aws.String(bucket),
 		Delete: &s3.Delete{Objects: chunk.Keys},
+		RequestPayer: aws.String(s.requestPayer),
 	})
 	if err != nil {
 		resultch <- &Object{Err: err}

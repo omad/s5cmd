@@ -69,6 +69,11 @@ var app = &cli.App{
 			Name:  "no-sign-request",
 			Usage: "do not sign requests: credentials will not be loaded if --no-sign-request is provided",
 		},
+		&cli.StringFlag{
+			Name:  "request-payer",
+			Value: "",
+			Usage: "Specify \"requester\" to confirm that *your* account will be charged for the request, not the bucket owner",
+		},
 	},
 	Before: func(c *cli.Context) error {
 		retryCount := c.Int("retry-count")
@@ -139,6 +144,7 @@ func NewStorageOpts(c *cli.Context) storage.Options {
 		NoVerifySSL:   c.Bool("no-verify-ssl"),
 		DryRun:        c.Bool("dry-run"),
 		NoSignRequest: c.Bool("no-sign-request"),
+		RequestPayer:  c.String("request-payer"),
 	}
 }
 
